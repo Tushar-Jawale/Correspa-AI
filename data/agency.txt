@@ -1,0 +1,94 @@
+**Correspa AI: Autonomous Customer Support Email Automation**
+
+---
+
+**Welcome to Correspa AI**
+
+Correspa AI is an autonomous, multi-agent email support system that monitors a business inbox, understands each incoming message, and produces accurate, on-brand draft replies. It is built and maintained by Tushar Jawale.
+
+---
+
+**What Correspa AI Does**
+
+- Continuously monitors a connected Gmail inbox for new, unanswered messages
+- Classifies each email as a product inquiry, customer complaint, customer feedback, or unrelated
+- Filters out irrelevant messages automatically
+- Uses Retrieval-Augmented Generation (RAG) to ground product answers in your own knowledge documents
+- Drafts natural, personalized replies instead of generic templates
+- Proofreads drafts for tone, accuracy, and formatting before saving them as Gmail drafts
+- Keeps a human in the loop — replies are queued as drafts and are not sent automatically
+
+---
+
+**How the Workflow Works**
+
+1. Load inbox: fetch unanswered emails from Gmail via the Gmail API
+2. Categorize: an LLM agent classifies the email
+3. Route:
+   - Product inquiry → build RAG queries, retrieve context, then draft a reply
+   - Complaint / feedback → draft an empathetic reply directly
+   - Unrelated → skip the email
+4. Draft: the writer agent composes the response
+5. Proofread: a reviewer agent checks the draft and may request a rewrite
+6. Queue: approved replies are saved as Gmail drafts
+
+---
+
+**Tech Stack**
+
+- Agent orchestration: LangChain and LangGraph
+- LLM inference: Groq and Google Gemini
+- Retrieval / vector store: Chroma with Google Generative AI embeddings
+- Email integration: Gmail API
+- API deployment: FastAPI and LangServe
+- Language: Python
+
+---
+
+**Plans and Pricing**
+
+Choose the plan that best suits your support team:
+
+1. **Free Plan**
+   - Inbox monitoring
+   - Email categorization
+   - Draft replies with human review
+   - Price: $0/month
+
+2. **Pro Plan**
+   - All Free Plan features
+   - Custom knowledge base (RAG)
+   - Priority draft quality review
+   - Price: $49/month
+
+3. **Premium Plan**
+   - All Pro Plan features
+   - Priority support
+   - Dedicated onboarding
+   - Custom integrations
+   - Price: $99/month
+
+---
+
+**Got Questions?**
+
+- *How much does Correspa AI cost?*
+  Free, Pro ($49/month), and Premium ($99/month) plans are available. Contact support for details.
+
+- *Does Correspa AI send emails automatically?*
+  No. Approved replies are saved as Gmail drafts so a human can review before sending.
+
+- *What knowledge does Correspa use for product answers?*
+  It retrieves context from documents stored in the local knowledge base (for example, files under the data folder).
+
+- *Which inbox does it work with?*
+  Correspa AI connects to Gmail through the Gmail API using OAuth credentials for your account.
+
+- *Who maintains this project?*
+  Correspa AI is maintained by Tushar Jawale.
+
+---
+
+**Get Started**
+
+Configure your API keys, connect Gmail, add your knowledge documents, then run the local workflow or API server to start drafting support replies.
