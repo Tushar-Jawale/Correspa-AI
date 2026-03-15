@@ -1,11 +1,20 @@
-"""Start API immediately so Render detects the port; build index in background if needed."""
+"""Start API immediately; copy Render secret files; build index in background if needed."""
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 os.chdir(ROOT)
+
+# Render Secret Files are mounted under /etc/secrets/<filename>
+secrets = Path("/etc/secrets")
+for name in ("token.json", "credentials.json"):
+    src = secrets / name
+    if src.exists():
+        shutil.copy(src, ROOT / name)
+        print(f"Loaded secret: {name}", flush=True)
 
 if not (ROOT / "db" / "chroma.sqlite3").exists():
     print("Building knowledge index in background...", flush=True)
