@@ -1,56 +1,32 @@
-from langchain_community.document_loaders import TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_chroma import Chroma
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+"""Build Chroma index from data/*.txt. Safe to run on Render (no blocking RAG test)."""
+from pathlib import Path
+
 from dotenv import load_dotenv
+from langchain_chroma import Chroma
+from langchain_community.document_loaders import TextLoader
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# Load environment variables from a .env file
-load_dotenv()
 
-RAG_SEARCH_PROMPT_TEMPLATE = """
-Using the following pieces of retrieved context, answer the question comprehensively and concisely.
-Ensure your response fully addresses the question based on the given context.
+def build_index(persist_directory: str = "db") -> None:
+    load_dotenv()
+    root = Path(__file__).resolve().parent
+    data_dir = root / "data"
+    docs = []
+    for path in sorted(data_dir.glob("*.txt")):
+        docs.extend(TextLoader(str(path), encoding="utf-8").load())
+    if not docs:
+        raise FileNotFoundError(f"No .txt files found in {data_dir}")
 
-**IMPORTANT:**
-Just provide the answer and never mention or refer to having access to the external context or information in your answer.
-If you are unable to determine the answer from the provided context, state 'I don't know.'
+    print("Loading & chunking docs...", flush=True)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
+    chunks = splitter.split_documents(docs)
 
-Question: {question}
-Context: {context}
-"""
+    print("Creating vector embeddings...", flush=True)
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+    Chroma.from_documents(chunks, embeddings, persist_directory=str(root / persist_directory))
+    print("Knowledge index ready.", flush=True)
 
-print("Loading & Chunking Docs...")
-loader = TextLoader("./data/agency.txt")
-docs = loader.load()
 
-doc_splitter = RecursiveCharacterTextSplitter(chunk_size=300, chunk_overlap=50)
-doc_chunks = doc_splitter.split_documents(docs)
-
-print("Creating vector embeddings...")
-embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
-
-vectorstore = Chroma.from_documents(doc_chunks, embeddings, persist_directory="db")
-
-# Semantic vector search
-vectorstore_retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-
-# Test RAG chain
-print("Test RAG chain...")
-prompt = ChatPromptTemplate.from_template(RAG_SEARCH_PROMPT_TEMPLATE)
-llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", temperature=0.1)
-
-rag_chain = (
-    {"context": vectorstore_retriever, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
-)
-
-query = "What are your pricing options?"
-result = rag_chain.invoke(query)
-print(f"Question: {query}")
-print(f"Answer: {result}")
-
+if __name__ == "__main__":
+    build_index()
