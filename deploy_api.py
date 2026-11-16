@@ -31,6 +31,7 @@ add_routes(app, RunnableLambda(invoke_workflow))
 
 frontend = ROOT.parent / 'frontend' / 'dist'
 if frontend.exists():
+    app.mount('/app', StaticFiles(directory=frontend, html=True), name='correspa')
     app.mount('/workspace', StaticFiles(directory=frontend, html=True), name='workspace')
 
 if __name__ == '__main__':

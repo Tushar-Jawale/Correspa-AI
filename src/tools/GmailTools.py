@@ -3,7 +3,8 @@ import re
 import uuid
 import base64
 from html import escape
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -189,43 +190,66 @@ class GmailToolsClass:
             "sender": headers.get("from", "Unknown"),
             "subject": headers.get("subject", "No Subject"),
             "body": self._get_email_body(payload),
+            "html": self._safe_email_html(payload),
+            "date": headers.get("date", ""),
+            "snippet": message.get("snippet", ""),
         }
     
+    def _mime_content(self, payload, mime_type):
+        """Find a body alternative recursively, ignoring file attachments."""
+        if payload.get('filename'):
+            return ''
+        if payload.get('mimeType') == mime_type:
+            data = payload.get('body', {}).get('data', '')
+            if data:
+                return base64.urlsafe_b64decode(data + '=' * (-len(data) % 4)).decode('utf-8', errors='replace')
+        for part in payload.get('parts', []):
+            content = self._mime_content(part, mime_type)
+            if content:
+                return content
+        return ''
+
     def _get_email_body(self, payload):
-        """
-        Extract the email body, prioritizing text/plain over text/html.
-        Handles multipart messages, avoids duplicating content, and strips HTML if necessary.
-        """
-        def decode_data(data):
-            """Decode base64-encoded data."""
-            return base64.urlsafe_b64decode(data).decode('utf-8').strip() if data else ""
-
-        def extract_body(parts):
-            """Recursively extract text content from parts."""
-            for part in parts:
-                mime_type = part.get('mimeType', '')
-                data = part['body'].get('data', '')
-                if mime_type == 'text/plain':
-                    return decode_data(data)
-                if mime_type == 'text/html':
-                    html_content = decode_data(data)
-                    return self._extract_main_content_from_html(html_content)
-                if 'parts' in part:
-                    result = extract_body(part['parts'])
-                    if result:
-                        return result
-            return ""
-
-        # Process single or multipart payload
-        if 'parts' in payload:
-            body = extract_body(payload['parts'])
-        else:
-            data = payload['body'].get('data', '')
-            body = decode_data(data)
-            if payload.get('mimeType') == 'text/html':
-                body = self._extract_main_content_from_html(body)
-
+        plain = self._mime_content(payload, 'text/plain')
+        html = self._mime_content(payload, 'text/html')
+        body = plain or self._extract_main_content_from_html(html)
         return self._clean_body_text(body)
+
+    def _safe_email_html(self, payload):
+        """Return inert semantic HTML: no scripts, styling, forms, or remote images."""
+        html = self._mime_content(payload, 'text/html')
+        if not html:
+            return ''
+        soup = BeautifulSoup(html, 'html.parser')
+        for comment in soup.find_all(string=lambda value: isinstance(value, Comment)):
+            comment.extract()
+        for node in soup.find_all(['script', 'style', 'head', 'meta', 'link', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'video', 'audio']):
+            node.decompose()
+        allowed = {'p', 'div', 'span', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'a'}
+        for node in list(soup.find_all(True)):
+            if node.name is None or node.attrs is None:
+                continue
+            style = node.get('style', '').replace(' ', '').lower()
+            if node.has_attr('hidden') or 'display:none' in style or 'visibility:hidden' in style:
+                node.decompose()
+                continue
+            if node.name == 'img':
+                alt = node.get('alt', '').strip()
+                if alt and len(alt) < 120:
+                    node.replace_with(soup.new_string(alt + ' '))
+                else:
+                    node.decompose()
+                continue
+            if node.name not in allowed:
+                node.unwrap()
+                continue
+            href = node.get('href', '')
+            node.attrs = {}
+            if node.name == 'a' and urlsplit(href).scheme.lower() in {'https', 'http', 'mailto'}:
+                node['href'] = href
+                node['target'] = '_blank'
+                node['rel'] = 'noopener noreferrer'
+        return str(soup)
 
     def _extract_main_content_from_html(self, html_content):
         """

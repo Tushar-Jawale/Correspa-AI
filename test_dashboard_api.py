@@ -10,6 +10,38 @@ app.include_router(api.router)
 client = TestClient(app)
 
 class DashboardTests(unittest.TestCase):
+    def test_mime_alternatives_and_safe_formatted_email(self):
+        import base64
+        from src.tools.GmailTools import GmailToolsClass
+        tool = GmailToolsClass.__new__(GmailToolsClass)
+        def part(kind, text):
+            return {'mimeType': kind, 'body': {'data': base64.urlsafe_b64encode(text.encode()).decode().rstrip('=')}}
+        payload = {'parts': [part('text/html', '<h2>Hello</h2><p>First paragraph.</p><p>Second paragraph.</p><script>alert(1)</script><a href="javascript:alert(1)" onclick="bad()">Bad link</a><img src="https://tracker.test/pixel"><div style="display:none">Hidden</div><!-- comment -->'), {'parts': [part('text/plain', 'Preferred plain text\n\nSecond paragraph.')]}]}
+        self.assertEqual(tool._get_email_body(payload), 'Preferred plain text\n\nSecond paragraph.')
+        html = tool._safe_email_html(payload)
+        self.assertIn('<h2>Hello</h2>', html)
+        self.assertIn('<p>Second paragraph.</p>', html)
+        for unsafe in ['script', 'onclick', 'javascript:', 'tracker.test', 'Hidden', '<!--']:
+            self.assertNotIn(unsafe, html)
+
+    def test_nested_hidden_email_content(self):
+        import base64
+        from src.tools.GmailTools import GmailToolsClass
+        tool = GmailToolsClass.__new__(GmailToolsClass)
+        html = '<html><head><style>p{color:red}</style></head><body><div style="display:none"><table><tr><td>Hidden</td></tr></table></div><p>Readable message</p></body></html>'
+        payload = {'mimeType':'text/html','body':{'data':base64.urlsafe_b64encode(html.encode()).decode()}}
+        self.assertIn('Readable message', tool._safe_email_html(payload))
+        self.assertNotIn('Hidden', tool._safe_email_html(payload))
+
+    def test_reply_escapes_html_and_keeps_plain_text(self):
+        from src.tools.GmailTools import GmailToolsClass
+        tool = GmailToolsClass.__new__(GmailToolsClass)
+        message = tool._create_html_email_message('a@example.com', 'Help', '<b>Hello</b>\nThanks')
+        parts = message.get_payload()
+        self.assertEqual(parts[0].get_content_type(), 'text/plain')
+        self.assertIn('&lt;b&gt;Hello&lt;/b&gt;<br>Thanks', parts[1].get_payload(decode=True).decode())
+        self.assertEqual(tool._clean_body_text('Hello\n\nWorld'), 'Hello\n\nWorld')
+
     def test_status_does_not_initialize_providers(self):
         with patch.object(api, 'gmail', side_effect=AssertionError('Must stay offline')):
             self.assertEqual(client.get('/api/status').status_code, 200)
