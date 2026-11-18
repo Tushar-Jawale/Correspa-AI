@@ -7,6 +7,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parent
 if hasattr(sys.stdout, "reconfigure"):
@@ -35,6 +36,11 @@ def invoke_workflow(state):
 
 
 add_routes(app, RunnableLambda(invoke_workflow))
+
+# Local and single-service deployments can serve the built React application.
+frontend = ROOT.parent / 'frontend' / 'dist'
+if frontend.exists():
+    app.mount('/app', StaticFiles(directory=frontend, html=True), name='correspa')
 
 
 @app.get("/")
