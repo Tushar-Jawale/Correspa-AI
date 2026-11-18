@@ -2,7 +2,7 @@ import os
 import re
 import uuid
 import base64
-from html import escape
+from html import escape, unescape
 from bs4 import BeautifulSoup, Comment
 from urllib.parse import urlsplit
 from datetime import datetime, timedelta
@@ -179,6 +179,9 @@ class GmailToolsClass:
             userId="me", id=msg_id, format="full"
         ).execute()
 
+        return self._parse_email_message(message, msg_id)
+
+    def _parse_email_message(self, message, msg_id):
         payload = message.get('payload', {})
         headers = {header["name"].lower(): header["value"] for header in payload.get("headers", [])}
 
@@ -192,7 +195,8 @@ class GmailToolsClass:
             "body": self._get_email_body(payload),
             "html": self._safe_email_html(payload),
             "date": headers.get("date", ""),
-            "snippet": message.get("snippet", ""),
+            "snippet": unescape(message.get("snippet", "")),
+            "received_at": int(message.get("internalDate", 0)),
         }
     
     def _mime_content(self, payload, mime_type):
@@ -216,39 +220,50 @@ class GmailToolsClass:
         return self._clean_body_text(body)
 
     def _safe_email_html(self, payload):
-        """Return inert semantic HTML: no scripts, styling, forms, or remote images."""
+        """Preserve email presentation inside the frontend's script-free CSP frame.
+
+        Image sources are inert data attributes until the reader opts in.
+        Stylesheets are inline only; external CSS, fonts, and active content
+        remain blocked by the frame policy, including after images are enabled.
+        """
         html = self._mime_content(payload, 'text/html')
         if not html:
             return ''
         soup = BeautifulSoup(html, 'html.parser')
         for comment in soup.find_all(string=lambda value: isinstance(value, Comment)):
             comment.extract()
-        for node in soup.find_all(['script', 'style', 'head', 'meta', 'link', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'video', 'audio']):
+        for node in soup.find_all(['script', 'meta', 'link', 'base', 'title', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'svg', 'video', 'audio', 'noscript', 'template']):
             node.decompose()
-        allowed = {'p', 'div', 'span', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'a'}
+        allowed = {'style', 'p', 'div', 'span', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'a', 'img', 'center', 'font'}
+        presentation = {'style', 'class', 'id', 'width', 'height', 'align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'color', 'size', 'face', 'dir', 'lang', 'title', 'alt', 'role'}
+        def safe_url(value, schemes):
+            try:
+                return urlsplit(value).scheme.lower() in schemes
+            except ValueError:
+                return False
         for node in list(soup.find_all(True)):
             if node.name is None or node.attrs is None:
                 continue
-            style = node.get('style', '').replace(' ', '').lower()
-            if node.has_attr('hidden') or 'display:none' in style or 'visibility:hidden' in style:
-                node.decompose()
-                continue
-            if node.name == 'img':
-                alt = node.get('alt', '').strip()
-                if alt and len(alt) < 120:
-                    node.replace_with(soup.new_string(alt + ' '))
-                else:
-                    node.decompose()
-                continue
+            if node.name == 'body':
+                node.name = 'div'
             if node.name not in allowed:
                 node.unwrap()
                 continue
-            href = node.get('href', '')
-            node.attrs = {}
-            if node.name == 'a' and urlsplit(href).scheme.lower() in {'https', 'http', 'mailto'}:
+            style = node.get('style', '').replace(' ', '').lower()
+            # Hidden preheaders should not become duplicate visible content.
+            if node.has_attr('hidden') or 'display:none' in style or 'visibility:hidden' in style:
+                node.decompose()
+                continue
+            href, src = node.get('href', ''), node.get('src', '')
+            node.attrs = {key: value for key, value in node.attrs.items() if key in presentation}
+            if node.name == 'a' and safe_url(href, {'https', 'http', 'mailto'}):
                 node['href'] = href
                 node['target'] = '_blank'
                 node['rel'] = 'noopener noreferrer'
+            if node.name == 'img':
+                if safe_url(src, {'https', 'http'}):
+                    node['data-remote-src'] = src
+                node['referrerpolicy'] = 'no-referrer'
         return str(soup)
 
     def _extract_main_content_from_html(self, html_content):

@@ -14,6 +14,7 @@ class CategorizeEmailOutput(BaseModel):
         ..., 
         description="The category assigned to the email, indicating its type based on predefined rules."
     )
+    reason: str = Field(..., description="One concise sentence explaining this message's intent and why the category applies. Refer to its actual content.")
 
 # **RAG Query Output**
 class RAGQueriesOutput(BaseModel):
